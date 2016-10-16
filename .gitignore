@@ -1,4 +1,6 @@
 ﻿*
-!*.mat
-!*.fig
+images*
 !.gitignore
+!*.m
+!*.fig
+

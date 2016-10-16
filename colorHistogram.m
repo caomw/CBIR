@@ -2,7 +2,7 @@ function cHist = colorHistogram(image)
 
     % rph = 0 or rph is omitted -> Course Partition Histogram (8+2+2 bins)
     % rph = 1 -> Refine Partition Histogram (8x2x2 bins)
-    rph = 0;
+    rph = 1;
 
     image = rgb2hsv(image);
 

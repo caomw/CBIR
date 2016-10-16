@@ -1,103 +1,90 @@
-% input: image in uint8 form
-% output: 1x64 feature vector containing the color auto correlogram
-function colorAutoCorrelogram = colorAutoCorrelogram(image)
+function  result = colorAutoCorrelogram(I)
 
-% quantize image into 64 colors = 4x4x4, in RGB space
-[img_no_dither, map] = rgb2ind(image, 64, 'nodither');
-% figure, imshow(img_no_dither, map);
+D = [1 3 5 7];
 
-rgb = ind2rgb(img_no_dither, map); % rgb = double(rgb)
-% imshow(rgb);
-% rgb = cat(3, r, g, b);
+% Quantize the image
+R = I(:,:,1);
+G = I(:,:,2);
+B = I(:,:,3);
 
-% clear workspace
-clear('img_no_dither');
+R_BITS = 2;
+G_BITS = 2;
+B_BITS = 2;
 
-% 4 predefined distances between
-% neighbor pixel intensities
-% according to "Image Indexing Using Color Correlograms" paper
-distances = [1 3 5 7];
+colorCnt = 2^R_BITS * 2^G_BITS * 2^B_BITS;
 
-colorAutoCorrelogram = correlogram(rgb, map, distances);
-colorAutoCorrelogram = reshape(colorAutoCorrelogram, [4 4 4]);
+R1 = bitshift(R,-(8-R_BITS));
+G1 = bitshift(G,-(8-G_BITS));
+B1 = bitshift(B,-(8-B_BITS));
 
-% consturct final correlogram using distances
-colorAutoCorrelogram(:, :, 1) = colorAutoCorrelogram(:, :, 1)*distances(1);
-colorAutoCorrelogram(:, :, 2) = colorAutoCorrelogram(:, :, 2)*distances(2);
-colorAutoCorrelogram(:, :, 3) = colorAutoCorrelogram(:, :, 3)*distances(3);
-colorAutoCorrelogram(:, :, 4) = colorAutoCorrelogram(:, :, 4)*distances(4);
+I = R1 + G1*2^R_BITS + B1*2^R_BITS*2^B_BITS;
 
-% reform it to vector format
-colorAutoCorrelogram = reshape(colorAutoCorrelogram, 1, 64);
+dCnt = length(D);
 
-end
+result = zeros(colorCnt,dCnt);
 
-% check if point is a valid pixel
-function valid = is_valid(X, Y, point)
-    if point(1) < 0 || point(1) >= X
-        valid = 0;
-    end
-    if point(2) < 0 || point(2) >= Y
-        valid = 0;
-    end
-    valid = 1;
-end
+% Generate all possible indices in the given image
+s = size(I);
+[r,c] = meshgrid(1:s(1),1:s(2));
+r = r(:);
+c = c(:);
 
-% find pixel neighbors
-function Cn = get_neighbors(X, Y, x, y, dist)
-    cn1 = [x+dist, y+dist];
-    cn2 = [x+dist, y];
-    cn3 = [x+dist, y-dist];
-    cn4 = [x, y-dist];
-    cn5 = [x-dist, y-dist];
-    cn6 = [x-dist, y];
-    cn7 = [x-dist, y+dist];
-    cn8 = [x, y+dist];
- 
-    points = {cn1, cn2, cn3, cn4, cn5, cn6, cn7, cn8};
-    Cn = cell(1, length(points));
- 
-    for ii = 1:length(points)
-        valid = is_valid(X, Y, points{1, ii});
-        if (valid)
-        Cn{1, ii} = points{1, ii};
-        end
-    end
+for k = 1:dCnt
     
+    d = D(k); 
+    oI = computeOffsetIndices(d);
+    oCnt = size(oI,1);
+
+    temp = zeros(colorCnt,1);
+    
+    % For each possible offset from a point given the distances
+    for i = 1:oCnt 
+        % Compute the histogram by taking into account only a single offset and accumulate the results
+        offset = oI(i,:);
+        temp = temp + GLCMATRIX(I,r,c,offset,colorCnt);
+    end
+
+    hc = zeros(colorCnt,1);
+
+    for j = 0:colorCnt-1
+        hc(j+1) = numel(I(I == j));
+    end
+
+    temp = temp ./ (hc+eps);
+    result(:,k) = temp/(8*d);
 end
- 
-% get correlogram
-function colors_percent = correlogram(photo, Cm, K)
-    [X, Y, ttt] = size(photo);
-    colors_percent = [];
- 
-    for k = 1:K
-        countColor = 0;
- 
-        color = zeros(1, length(Cm));
- 
-        for x = 2:floor(X/10):X
-           for y = 2:floor(Y/10):Y
-               Ci = photo(x, y);
-               Cn = get_neighbors(X, Y, x, y, k);
- 
-               for jj = 1:length(Cn)
-                   Cj = photo( Cn{1, jj}(1), Cn{1, jj}(2) );
- 
-                   for m = 1:length(Cm)
-                       if isequal(Cm(m), Ci) && isequal(Cm(m), Cj)
-                           countColor = countColor + 1;
-                           color(m) = color(m) + 1;
-                       end
-                   end
-               end
-           end
-        end
- 
-        for ii = 1:length(color)
-            color(ii) = double( color(ii) / countColor );
-        end
- 
-        colors_percent = color;
+
+result = result(:)';
+end
+
+function os = computeOffsetIndices(d)
+    [r,c] = meshgrid(-d:d,-d:d);
+    r = r(:);
+    c = c(:);
+    os = [r c];
+    good = max(abs(r),abs(c)) == d;
+    os = os(good,:);
+end
+
+function out = GLCMATRIX(I,r,c,offset,nl)
+    s = size(I);
+    r2 = r+offset(1);
+    c2 = c+offset(2);
+    
+    good = c2>=1 & c2<=s(2) & r2>=1 & r2<=s(1);
+   
+    Index = [r c r2 c2];
+    Index = Index(good,:);
+
+    v1 = I(sub2ind(s,Index(:,1),Index(:,2)));
+    v2 = I(sub2ind(s,Index(:,3),Index(:,4)));
+
+    good = v1 == v2;
+    v1 = v1(good,:);
+    
+    if isempty(v1)
+        out = zeros(nl,1);
+    else
+        out = accumarray(v1(:,1)+1,1,[nl 1]);
     end
 end
